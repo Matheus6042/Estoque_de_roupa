@@ -1,0 +1,5 @@
+estoque.db
+tema.txt
+__pycache__/
+.venv/
+*.pyc
