@@ -4,7 +4,7 @@ import os
 import csv
 import shutil
 from datetime import datetime
-from banco import BancoDeDados
+from banco import BancoDeDados, EstoqueInsuficienteError, DadosInvalidosError, BackupInvalidoError
 
 # Constantes globais do sistema
 ARQUIVO_TEMA = "tema.txt"
@@ -79,19 +79,18 @@ class SistemaEstoqueApp:
         self.produto_id_selecionado = None
         self.montar_tela_login()
 
-    # ==========================================
+   # ==========================================
     # VALIDAÇÕES DE ENTRADA (MÁSCARAS)
     # ==========================================
-    def formatar_quantidade(self, var_name, index, mode):
-        """Filtra a entrada de texto do campo Quantidade, permitindo apenas caracteres numéricos."""
-        texto = self.var_qtd.get()
+    def formatar_quantidade(self, event=None):
+        texto = self.entry_quantidade.get()
         texto_limpo = ''.join([c for c in texto if c.isdigit()])
         if texto != texto_limpo:
-            self.var_qtd.set(texto_limpo)
+            self.entry_quantidade.delete(0, END)
+            self.entry_quantidade.insert(0, texto_limpo)
 
-    def formatar_preco(self, var_name, index, mode):
-        """Filtra a entrada de texto do campo Preço, formatando para valores monetários válidos."""
-        texto = self.var_preco.get()
+    def formatar_preco(self, event=None):
+        texto = self.entry_preco.get()
         texto_limpo = ''.join([c for c in texto if c.isdigit() or c in ',.'])
         texto_limpo = texto_limpo.replace('.', ',')
         
@@ -100,24 +99,23 @@ class SistemaEstoqueApp:
             texto_limpo = partes[0] + ',' + ''.join(partes[1:])
             
         if texto != texto_limpo:
-            self.var_preco.set(texto_limpo)
+            self.entry_preco.delete(0, END)
+            self.entry_preco.insert(0, texto_limpo)
 
-    def formatar_qtd_mov(self, var_name, index, mode):
-        """Filtra a entrada de texto da movimentação de estoque, permitindo apenas numéricos."""
-        texto = self.var_qtd_mov.get()
+    def formatar_qtd_mov(self, event=None):
+        texto = self.entry_qtd_mov.get()
         texto_limpo = ''.join([c for c in texto if c.isdigit()])
         if texto != texto_limpo:
-            self.var_qtd_mov.set(texto_limpo)
+            self.entry_qtd_mov.delete(0, END)
+            self.entry_qtd_mov.insert(0, texto_limpo)
 
     # ==========================================
     # CONSTRUÇÃO DA INTERFACE PRINCIPAL
     # ==========================================
     def montar_tela_principal(self):
-        """Orquestra a montagem de todos os componentes da interface principal baseada em permissões."""
         self.frame_principal = ctk.CTkFrame(self.root, fg_color="transparent")
         self.frame_principal.pack(fill=BOTH, expand=True)
         
-        # Cabeçalho
         frame_header = ctk.CTkFrame(self.frame_principal, corner_radius=0, height=50)
         frame_header.pack(fill="x")
         
@@ -128,21 +126,21 @@ class SistemaEstoqueApp:
             
         ctk.CTkButton(frame_header, text="Sair", fg_color="#E74C3C", hover_color="#C0392B", width=80, command=self.fazer_logout).pack(side=RIGHT, padx=20)
 
-        # Formulário de Cadastro Condicional
         if self.permissoes.get('cadastrar_produto'):
             self.montar_area_cadastro()
 
-        # Área de Ações Central
         frame_meio = ctk.CTkFrame(self.frame_principal, fg_color="transparent")
         frame_meio.pack(fill="x", padx=20, pady=10)
         
         self.montar_area_movimentacao(frame_meio)
         self.montar_area_busca(frame_meio)
 
-        # Tabelas e Rodapé
         self.montar_tabela()
         self.montar_rodape()
         self.carregar_dados()
+        
+        self.root.update_idletasks()
+        self.root.focus_set()
 
     def montar_area_cadastro(self):
         """Constrói o formulário de inserção e edição de produtos no inventário."""
@@ -164,18 +162,19 @@ class SistemaEstoqueApp:
         self.combo_tamanho = ctk.CTkComboBox(frame_form, values=["Único", "PP", "P", "M", "G", "GG"], width=100)
         self.combo_tamanho.set("Tamanho")
         self.combo_tamanho.grid(row=2, column=2, padx=10, pady=5, sticky=W)
-        self.entry_cor = ctk.CTkEntry(frame_form, placeholder_text="Cor", width=120)
+        
+        # Cor com asterisco de obrigatoriedade
+        self.entry_cor = ctk.CTkEntry(frame_form, placeholder_text="Cor*", width=120)
         self.entry_cor.grid(row=2, column=3, padx=10, pady=5, sticky=W)
         
-        self.var_qtd = ctk.StringVar()
-        self.var_qtd.trace_add("write", self.formatar_quantidade)
-        self.entry_quantidade = ctk.CTkEntry(frame_form, placeholder_text="Qtd Inicial*", width=100, textvariable=self.var_qtd)
+        # Entradas sem StringVar, usando bind direto para formatação
+        self.entry_quantidade = ctk.CTkEntry(frame_form, placeholder_text="Qtd Inicial*", width=100)
         self.entry_quantidade.grid(row=3, column=0, padx=10, pady=(5, 15), sticky=W)
+        self.entry_quantidade.bind("<KeyRelease>", self.formatar_quantidade)
         
-        self.var_preco = ctk.StringVar()
-        self.var_preco.trace_add("write", self.formatar_preco)
-        self.entry_preco = ctk.CTkEntry(frame_form, placeholder_text="Preço (R$)*", width=120, textvariable=self.var_preco)
+        self.entry_preco = ctk.CTkEntry(frame_form, placeholder_text="Preço (R$)*", width=120)
         self.entry_preco.grid(row=3, column=1, padx=10, pady=(5, 15), sticky=W)
+        self.entry_preco.bind("<KeyRelease>", self.formatar_preco)
         
         frame_btn = ctk.CTkFrame(frame_form, fg_color="transparent")
         frame_btn.grid(row=3, column=2, columnspan=2, sticky=E, padx=10, pady=(5, 15))
@@ -186,7 +185,6 @@ class SistemaEstoqueApp:
         ctk.CTkButton(frame_btn, text="Excluir", fg_color="#F44336", hover_color="#D32F2F", width=80, command=self.excluir_produto).pack(side=LEFT, padx=5)
 
     def montar_area_movimentacao(self, parent_frame):
-        """Constrói os controles para registro de entrada e saída de mercadorias."""
         frame_mov = ctk.CTkFrame(parent_frame)
         frame_mov.pack(side=LEFT, fill="x", expand=True, padx=(0, 10))
         
@@ -206,16 +204,13 @@ class SistemaEstoqueApp:
         self.entry_envolvido = ctk.CTkEntry(frame_inputs, placeholder_text="Cliente/Fornecedor", width=150)
         self.entry_envolvido.pack(side=LEFT, padx=5)
         
-        self.var_qtd_mov = ctk.StringVar()
-        self.var_qtd_mov.trace_add("write", self.formatar_qtd_mov)
-        self.entry_qtd_mov = ctk.CTkEntry(frame_inputs, placeholder_text="Qtd", width=60, textvariable=self.var_qtd_mov)
+        self.entry_qtd_mov = ctk.CTkEntry(frame_inputs, placeholder_text="Qtd", width=60)
         self.entry_qtd_mov.pack(side=LEFT, padx=5)
+        self.entry_qtd_mov.bind("<KeyRelease>", self.formatar_qtd_mov)
         
         ctk.CTkButton(frame_inputs, text="Confirmar", command=self.registrar_movimentacao, width=80).pack(side=LEFT, padx=10)
-
-        # Associa a tecla Enter ao registro de movimentação (suporte a leitores de código de barras)
         self.entry_qtd_mov.bind("<Return>", self.registrar_movimentacao)
-
+        
     def montar_area_busca(self, parent_frame):
         """Constrói o componente de pesquisa de produtos no inventário."""
         frame_busca = ctk.CTkFrame(parent_frame)
@@ -295,6 +290,7 @@ class SistemaEstoqueApp:
         
         total_pecas = 0
         valor_total = 0
+        pode_ver_financeiro = self.permissoes.get('ver_financeiro')
         
         for i, linha in enumerate(linhas):
             linha_lista = list(linha)
@@ -303,9 +299,12 @@ class SistemaEstoqueApp:
             
             total_pecas += qtd
             valor_total += (qtd * preco)
-            linha_lista[7] = f"R$ {preco:.2f}".replace(".", ",")
             
-            # Aplica formatação de alerta crítico caso o estoque seja menor ou igual a 5
+            if pode_ver_financeiro:
+                linha_lista[7] = f"R$ {preco:.2f}".replace(".", ",")
+            else:
+                linha_lista[7] = "R$ ***"
+                
             if qtd <= 5:
                 tag = 'baixo_par' if i % 2 == 0 else 'baixo_impar'
             else:
@@ -314,13 +313,13 @@ class SistemaEstoqueApp:
             self.tree.insert("", END, values=linha_lista, tags=(tag,))
             
         self.lbl_total_pecas.configure(text=f"Total de Peças: {total_pecas} un")
-        if self.permissoes.get('ver_financeiro'):
+        
+        if pode_ver_financeiro:
             self.lbl_valor_total.configure(text=f"Valor do Inventário: R$ {valor_total:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
         else:
             self.lbl_valor_total.configure(text="Valor do Inventário: 🔒 Oculto")
 
     def limpar_campos_produto(self):
-        """Reseta todos os inputs do formulário de cadastro para seus valores padronizados."""
         if not hasattr(self, 'entry_id'): return
         self.entry_id.configure(state="normal")
         self.entry_id.delete(0, END)
@@ -330,11 +329,10 @@ class SistemaEstoqueApp:
         self.combo_categoria.set("Categoria")
         self.combo_tamanho.set("Tamanho")
         self.entry_cor.delete(0, END)
-        self.var_qtd.set("")
-        self.var_preco.set("")
+        self.entry_quantidade.delete(0, END)
+        self.entry_preco.delete(0, END)
 
     def selecionar_produto(self, event):
-        """Captura o evento de clique na grade e popula os formulários correspondentes."""
         item_selecionado = self.tree.focus()
         if not item_selecionado: return
             
@@ -353,18 +351,18 @@ class SistemaEstoqueApp:
             self.combo_tamanho.set(valores[4])
             self.entry_cor.insert(0, valores[5])
             
-            self.var_qtd.set(valores[6])
+            self.entry_quantidade.insert(0, valores[6])
+            
             preco_limpo = str(valores[7]).replace("R$ ", "")
-            self.var_preco.set(preco_limpo)
-
+            self.entry_preco.insert(0, preco_limpo)
+            
     def adicionar_produto(self):
-        """Valida e persiste um novo registro de produto no banco de dados."""
-        if not self.entry_nome.get() or not self.var_qtd.get() or not self.var_preco.get():
-            messagebox.showerror("Erro de Validação", "Nome, Quantidade e Preço são campos obrigatórios.")
+        if not self.entry_nome.get() or not self.entry_cor.get() or not self.entry_quantidade.get() or not self.entry_preco.get():
+            messagebox.showerror("Erro de Validação", "Nome, Cor, Quantidade e Preço são campos obrigatórios.")
             return
         try:
-            qtd = int(self.var_qtd.get())
-            prc = float(self.var_preco.get().replace(",", "."))
+            qtd = int(self.entry_quantidade.get())
+            prc = float(self.entry_preco.get().replace(",", "."))
         except ValueError:
             messagebox.showerror("Erro de Tipo", "Quantidade e Preço contêm valores inválidos.")
             return
@@ -375,6 +373,25 @@ class SistemaEstoqueApp:
         self.carregar_dados()
         messagebox.showinfo("Operação Concluída", "Produto registrado com sucesso no sistema.")
 
+    def atualizar_produto(self):
+        produto_id = self.entry_id.get()
+        if not produto_id: return
+        if not self.entry_nome.get() or not self.entry_cor.get() or not self.entry_quantidade.get() or not self.entry_preco.get():
+            messagebox.showerror("Erro de Validação", "Nome, Cor, Quantidade e Preço são campos obrigatórios.")
+            return
+        try:
+            qtd = int(self.entry_quantidade.get())
+            prc = float(self.entry_preco.get().replace(",", "."))
+        except ValueError:
+            messagebox.showerror("Erro de Validação", "Valores numéricos inválidos informados.")
+            return
+
+        self.db.atualizar_produto(produto_id, self.entry_codigo.get(), self.entry_nome.get(), 
+                                  self.combo_categoria.get(), self.combo_tamanho.get(), self.entry_cor.get(), qtd, prc)
+        self.limpar_campos_produto()
+        self.carregar_dados()
+        messagebox.showinfo("Operação Concluída", "Dados do produto atualizados com sucesso.")
+        
     def atualizar_produto(self):
         """Atualiza as informações de um produto existente selecionado pelo ID."""
         produto_id = self.entry_id.get()
@@ -403,10 +420,6 @@ class SistemaEstoqueApp:
             messagebox.showinfo("Operação Concluída", "Produto removido da base de dados.")
 
     def registrar_movimentacao(self, event=None):
-        """
-        Processa transações de entrada ou saída no inventário.
-        Inclui prevenção nativa contra eventos de retorno vazios (Enter fantasma).
-        """
         if not self.produto_id_selecionado:
             if event is None:
                 messagebox.showwarning("Seleção Necessária", "Selecione um item no inventário previamente.")
@@ -414,7 +427,7 @@ class SistemaEstoqueApp:
             
         tipo_mov = self.combo_tipo_mov.get()
         envolvido = self.entry_envolvido.get()
-        qtd_mov_str = self.var_qtd_mov.get()
+        qtd_mov_str = self.entry_qtd_mov.get()
         
         if not envolvido or not qtd_mov_str:
             messagebox.showwarning("Dados Incompletos", "É necessário preencher a Entidade e a Quantidade.")
@@ -427,30 +440,21 @@ class SistemaEstoqueApp:
             messagebox.showerror("Erro de Formato", "A quantidade transacionada deve ser um inteiro positivo.")
             return "break"
             
-        dados_prod = self.db.buscar_produto_por_id(self.produto_id_selecionado)
-        if not dados_prod: return "break"
-        nome_produto, estoque_atual = dados_prod
-        
-        if tipo_mov == MOV_SAIDA:
-            if estoque_atual - qtd_mov < 0:
-                messagebox.showerror("Estoque Insuficiente", f"Transação negada. Saldo atual: {estoque_atual} unidades.")
-                return "break"
-            novo_estoque = estoque_atual - qtd_mov
-            msg = f"Transação de {MOV_SAIDA} registrada: {qtd_mov} un. (Referência: {envolvido})."
-        else:
-            novo_estoque = estoque_atual + qtd_mov
-            msg = f"Transação de {MOV_ENTRADA} registrada: {qtd_mov} un. (Referência: {envolvido})."
+        try:
+            self.db.movimentar_estoque(self.produto_id_selecionado, tipo_mov, envolvido, qtd_mov)
+            msg = f"Transação de {tipo_mov} registrada: {qtd_mov} un. (Referência: {envolvido})."
             
-        self.db.registrar_movimentacao(self.produto_id_selecionado, tipo_mov, envolvido, qtd_mov, novo_estoque, nome_produto)
-        
-        self.entry_envolvido.delete(0, END)
-        self.var_qtd_mov.set("")
-        self.lbl_produto_mov.configure(text="Produto Selecionado: Nenhum")
-        self.produto_id_selecionado = None
-        self.carregar_dados()
-        
-        self.root.focus_set()
-        messagebox.showinfo("Transação Concluída", msg)
+            self.entry_envolvido.delete(0, END)
+            self.entry_qtd_mov.delete(0, END)
+            self.lbl_produto_mov.configure(text="Produto Selecionado: Nenhum")
+            self.produto_id_selecionado = None
+            self.carregar_dados()
+            self.root.focus_set()
+            messagebox.showinfo("Transação Concluída", msg)
+            
+        except Exception as e:
+            messagebox.showerror("Aviso do Sistema", str(e))
+            
         return "break"
 
     def exportar_excel(self):
@@ -469,11 +473,15 @@ class SistemaEstoqueApp:
         
         if caminho:
             try:
+                pode_ver_financeiro = self.permissoes.get('ver_financeiro')
                 with open(caminho, mode='w', newline='', encoding='utf-8-sig') as f:
                     writer = csv.writer(f, delimiter=';')
                     writer.writerow(["ID", "Código", "Nome", "Categoria", "Tamanho", "Cor", "Qtd", "Preço"])
                     for linha in linhas:
-                        writer.writerow(linha)
+                        linha_lista = list(linha)
+                        if not pode_ver_financeiro:
+                            linha_lista[7] = "***"
+                        writer.writerow(linha_lista)
                 messagebox.showinfo("Sucesso", "Dados exportados com sucesso para o diretório informado.")
             except Exception as e:
                 messagebox.showerror("Falha na Exportação", f"Ocorreu um erro ao processar o arquivo: {e}")
@@ -572,7 +580,7 @@ class SistemaEstoqueApp:
             arquivo.write(nova_escolha)
 
     def fazer_backup(self):
-        """Clona o arquivo de banco de dados SQLite para fins de contingência."""
+        """Usa a API segura do backend para criar o snapshot do banco de dados."""
         nome_padrao = f"backup_estoque_{datetime.now().strftime('%d_%m_%Y')}.db"
         caminho = filedialog.asksaveasfilename(
             defaultextension=".db", filetypes=[("Banco de Dados", "*.db")],
@@ -580,23 +588,28 @@ class SistemaEstoqueApp:
         )
         if caminho:
             try:
-                shutil.copy2("estoque.db", caminho)
+                self.db.criar_backup(caminho)
                 messagebox.showinfo("Operação Concluída", "Ponto de restauração estabelecido com sucesso.")
             except Exception as e:
                 messagebox.showerror("Falha de Contingência", f"Impossível consolidar backup: {e}")
 
     def restaurar_backup(self):
-        """Substitui o estado atual do banco de dados por um snapshot anterior."""
+        """Valida a integridade via backend antes de substituir a base ativa."""
         if not messagebox.askyesno("Sobrescrita de Dados", "A restauração removerá irreversivelmente os dados não contidos no backup. Prosseguir?"):
             return
+            
         caminho = filedialog.askopenfilename(filetypes=[("Banco de Dados", "*.db")], title="Localizar Snapshot")
         if caminho:
             try:
-                shutil.copy2(caminho, "estoque.db")
+                self.db.restaurar_backup(caminho)
                 self.carregar_dados()
                 messagebox.showinfo("Operação Concluída", "Estado do banco de dados revertido com sucesso.")
+            except BackupInvalidoError as e:
+                messagebox.showerror("Arquivo Corrompido", str(e))
+            except DadosInvalidosError as e:
+                messagebox.showerror("Operação Inválida", str(e))
             except Exception as e:
-                messagebox.showerror("Falha de Restauração", f"Impossível processar o arquivo informado: {e}")
+                messagebox.showerror("Falha de Restauração", f"Ocorreu um erro inesperado:\n{type(e).__name__}: {str(e)}")
 
     def salvar_configs(self, janela, s_dono, s_caixa, v_fin, v_cad, v_ent, v_his):
         """Sincroniza as preferências locais de matriz de acesso com o banco de dados."""
