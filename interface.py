@@ -1,39 +1,43 @@
+"""Módulo de Interface Gráfica (Presentation Layer)."""
+
+import os
+from datetime import datetime
 import customtkinter as ctk
 from tkinter import ttk, messagebox, filedialog, END, W, E, LEFT, RIGHT, BOTTOM, BOTH, Y, CENTER
-import os
-import csv
-import shutil
-from datetime import datetime
-from banco import BancoDeDados, EstoqueInsuficienteError, DadosInvalidosError, BackupInvalidoError
 
-# Constantes globais do sistema
-ARQUIVO_TEMA = "tema.txt"
+from controller import EstoqueController
+from banco import EstoqueInsuficienteError, DadosInvalidosError, BackupInvalidoError
+
+DIRETORIO_BASE = os.path.dirname(os.path.abspath(__file__))
+ARQUIVO_TEMA = os.path.join(DIRETORIO_BASE, "tema.txt")
 MOV_SAIDA = "Saída"
 MOV_ENTRADA = "Entrada"
 
 class SistemaEstoqueApp:
     def __init__(self, root):
-        """Inicializa a aplicação, configura a janela principal e estabelece conexão com o banco de dados."""
         self.root = root
         self.root.title("Controle de Estoque")
         self.root.geometry("1000x800")
         
-        self.db = BancoDeDados()
-        
-        self.perfil_usuario = ""
-        self.permissoes = {}
+        self.controller = EstoqueController()
         self.produto_id_selecionado = None
         
         self.frame_login = None
         self.frame_principal = None
         
         self.montar_tela_login()
+        # Substitui o "crash" no terminal por alertas amigáveis
+        self.root.report_callback_exception = self.manipular_erro_global
 
-    # ==========================================
-    # MÓDULO DE AUTENTICAÇÃO
-    # ==========================================
+    def manipular_erro_global(self, exc_type, exc_value, exc_traceback):
+        """Captura falhas críticas do sistema e exibe uma mensagem amigável."""
+        mensagem_amigavel = (
+            "Desculpe, o sistema encontrou uma instabilidade inesperada.\n"
+            "Tente realizar a operação novamente."
+        )
+        messagebox.showerror("Aviso do Sistema", f"{mensagem_amigavel}\n\nDetalhe Técnico: {exc_value}")
+
     def montar_tela_login(self):
-        """Constrói a interface gráfica de autenticação de usuários."""
         if self.frame_principal:
             self.frame_principal.destroy()
             
@@ -41,47 +45,29 @@ class SistemaEstoqueApp:
         self.frame_login.place(relx=0.5, rely=0.5, anchor=CENTER)
 
         ctk.CTkLabel(self.frame_login, text="🔐 Acesso ao Sistema", font=("Arial", 20, "bold")).pack(pady=(30, 20))
-        
         self.entry_user = ctk.CTkEntry(self.frame_login, placeholder_text="Usuário", width=250)
         self.entry_user.pack(pady=10)
-        
         self.entry_senha = ctk.CTkEntry(self.frame_login, placeholder_text="Senha", show="*", width=250)
         self.entry_senha.pack(pady=10)
         
         ctk.CTkButton(self.frame_login, text="Entrar", font=("Arial", 14, "bold"), command=self.fazer_login, width=250).pack(pady=(20, 10))
-        
         ctk.CTkLabel(self.frame_login, text="Usuários padrão: dono | caixa", text_color="gray", font=("Arial", 10)).pack(pady=(0, 20))
 
     def fazer_login(self):
-        """Valida as credenciais inseridas e carrega as permissões do usuário no sistema."""
         usuario = self.entry_user.get()
         senha = self.entry_senha.get()
         
-        user_data = self.db.fazer_login(usuario, senha)
-        
-        if user_data:
-            self.perfil_usuario = user_data[0]
-            self.permissoes = {
-                'ver_financeiro': user_data[1],
-                'cadastrar_produto': user_data[2],
-                'fazer_entrada': user_data[3],
-                'ver_historico': user_data[4]
-            }
+        if self.controller.autenticar(usuario, senha):
             self.frame_login.destroy()
             self.montar_tela_principal()
         else:
             messagebox.showerror("Erro de Autenticação", "Usuário ou senha incorretos.")
 
     def fazer_logout(self):
-        """Encerra a sessão do usuário atual e retorna à tela de login."""
-        self.perfil_usuario = ""
-        self.permissoes = {}
+        self.controller.encerrar_sessao()
         self.produto_id_selecionado = None
         self.montar_tela_login()
 
-   # ==========================================
-    # VALIDAÇÕES DE ENTRADA (MÁSCARAS)
-    # ==========================================
     def formatar_quantidade(self, event=None):
         texto = self.entry_quantidade.get()
         texto_limpo = ''.join([c for c in texto if c.isdigit()])
@@ -93,11 +79,9 @@ class SistemaEstoqueApp:
         texto = self.entry_preco.get()
         texto_limpo = ''.join([c for c in texto if c.isdigit() or c in ',.'])
         texto_limpo = texto_limpo.replace('.', ',')
-        
         if texto_limpo.count(',') > 1:
             partes = texto_limpo.split(',')
             texto_limpo = partes[0] + ',' + ''.join(partes[1:])
-            
         if texto != texto_limpo:
             self.entry_preco.delete(0, END)
             self.entry_preco.insert(0, texto_limpo)
@@ -109,9 +93,6 @@ class SistemaEstoqueApp:
             self.entry_qtd_mov.delete(0, END)
             self.entry_qtd_mov.insert(0, texto_limpo)
 
-    # ==========================================
-    # CONSTRUÇÃO DA INTERFACE PRINCIPAL
-    # ==========================================
     def montar_tela_principal(self):
         self.frame_principal = ctk.CTkFrame(self.root, fg_color="transparent")
         self.frame_principal.pack(fill=BOTH, expand=True)
@@ -119,14 +100,14 @@ class SistemaEstoqueApp:
         frame_header = ctk.CTkFrame(self.frame_principal, corner_radius=0, height=50)
         frame_header.pack(fill="x")
         
-        ctk.CTkLabel(frame_header, text=f"👤 Logado como: {self.perfil_usuario.title()}", font=("Arial", 14, "bold")).pack(side=LEFT, padx=20, pady=10)
+        ctk.CTkLabel(frame_header, text=f"👤 Logado como: {self.controller.perfil_usuario.title()}", font=("Arial", 14, "bold")).pack(side=LEFT, padx=20, pady=10)
         
-        if self.perfil_usuario == "proprietario":
+        if self.controller.perfil_usuario == "proprietario":
             ctk.CTkButton(frame_header, text="⚙️ Configurações", fg_color="#FF9800", hover_color="#E68A00", command=self.abrir_configuracoes).pack(side=LEFT, padx=20)
             
         ctk.CTkButton(frame_header, text="Sair", fg_color="#E74C3C", hover_color="#C0392B", width=80, command=self.fazer_logout).pack(side=RIGHT, padx=20)
 
-        if self.permissoes.get('cadastrar_produto'):
+        if self.controller.permissoes.get('cadastrar_produto'):
             self.montar_area_cadastro()
 
         frame_meio = ctk.CTkFrame(self.frame_principal, fg_color="transparent")
@@ -143,7 +124,6 @@ class SistemaEstoqueApp:
         self.root.focus_set()
 
     def montar_area_cadastro(self):
-        """Constrói o formulário de inserção e edição de produtos no inventário."""
         frame_form = ctk.CTkFrame(self.frame_principal)
         frame_form.pack(fill="x", padx=20, pady=(10, 0))
         
@@ -162,12 +142,9 @@ class SistemaEstoqueApp:
         self.combo_tamanho = ctk.CTkComboBox(frame_form, values=["Único", "PP", "P", "M", "G", "GG"], width=100)
         self.combo_tamanho.set("Tamanho")
         self.combo_tamanho.grid(row=2, column=2, padx=10, pady=5, sticky=W)
-        
-        # Cor com asterisco de obrigatoriedade
         self.entry_cor = ctk.CTkEntry(frame_form, placeholder_text="Cor*", width=120)
         self.entry_cor.grid(row=2, column=3, padx=10, pady=5, sticky=W)
         
-        # Entradas sem StringVar, usando bind direto para formatação
         self.entry_quantidade = ctk.CTkEntry(frame_form, placeholder_text="Qtd Inicial*", width=100)
         self.entry_quantidade.grid(row=3, column=0, padx=10, pady=(5, 15), sticky=W)
         self.entry_quantidade.bind("<KeyRelease>", self.formatar_quantidade)
@@ -194,8 +171,8 @@ class SistemaEstoqueApp:
         frame_inputs = ctk.CTkFrame(frame_mov, fg_color="transparent")
         frame_inputs.pack(fill="x", padx=10, pady=(0, 10))
         
-        valores_mov = [MOV_SAIDA, MOV_ENTRADA] if self.permissoes.get('fazer_entrada') else [MOV_SAIDA]
-        estado_mov = "normal" if self.permissoes.get('fazer_entrada') else "disabled"
+        valores_mov = [MOV_SAIDA, MOV_ENTRADA] if self.controller.permissoes.get('fazer_entrada') else [MOV_SAIDA]
+        estado_mov = "normal" if self.controller.permissoes.get('fazer_entrada') else "disabled"
         
         self.combo_tipo_mov = ctk.CTkComboBox(frame_inputs, values=valores_mov, width=90, state=estado_mov)
         self.combo_tipo_mov.set(MOV_SAIDA) 
@@ -210,14 +187,12 @@ class SistemaEstoqueApp:
         
         ctk.CTkButton(frame_inputs, text="Confirmar", command=self.registrar_movimentacao, width=80).pack(side=LEFT, padx=10)
         self.entry_qtd_mov.bind("<Return>", self.registrar_movimentacao)
-        
+
     def montar_area_busca(self, parent_frame):
-        """Constrói o componente de pesquisa de produtos no inventário."""
         frame_busca = ctk.CTkFrame(parent_frame)
         frame_busca.pack(side=RIGHT, fill="both")
         
         ctk.CTkLabel(frame_busca, text="🔍 Buscar Produto", font=("Arial", 12, "bold")).pack(anchor=W, padx=10, pady=(10, 5))
-        
         frame_inputs = ctk.CTkFrame(frame_busca, fg_color="transparent")
         frame_inputs.pack(fill="x", padx=10, pady=(0, 10))
         
@@ -226,12 +201,9 @@ class SistemaEstoqueApp:
         
         ctk.CTkButton(frame_inputs, text="Buscar", fg_color="#4CAF50", hover_color="#45a049", width=60, command=self.carregar_dados).pack(side=LEFT, padx=5)
         ctk.CTkButton(frame_inputs, text="Limpar", fg_color="gray", hover_color="#555555", width=60, command=lambda: [self.entry_busca.delete(0, END), self.carregar_dados()]).pack(side=LEFT, padx=5)
-
-        # Associa a tecla Enter à execução da busca
         self.entry_busca.bind("<Return>", lambda event: self.carregar_dados())
 
     def montar_tabela(self):
-        """Instancia e configura a visualização em grade (Treeview) do estoque."""
         frame_tabela = ctk.CTkFrame(self.frame_principal)
         frame_tabela.pack(fill=BOTH, expand=True, padx=20, pady=5)
         
@@ -243,7 +215,6 @@ class SistemaEstoqueApp:
         
         self.tree = ttk.Treeview(frame_tabela, columns=("ID", "Código", "Nome", "Categoria", "Tamanho", "Cor", "Qtd", "Preço"), show="headings")
         
-        # Configuração de estilos visuais (Zebrado e Alertas de Estoque)
         self.tree.tag_configure('impar', background='#2b2b2b')
         self.tree.tag_configure('par', background='#383838')
         self.tree.tag_configure('baixo_impar', background='#2b2b2b', foreground='#FF5252')
@@ -262,7 +233,6 @@ class SistemaEstoqueApp:
         self.tree.bind("<ButtonRelease-1>", self.selecionar_produto)
 
     def montar_rodape(self):
-        """Constrói a barra de status inferior com resumos estatísticos e ações complementares."""
         frame_resumo = ctk.CTkFrame(self.frame_principal, corner_radius=0, height=60)
         frame_resumo.pack(fill="x", side=BOTTOM)
         
@@ -272,45 +242,38 @@ class SistemaEstoqueApp:
         self.lbl_valor_total = ctk.CTkLabel(frame_resumo, text="Valor do Inventário: R$ 0,00", font=("Arial", 16, "bold"))
         self.lbl_valor_total.pack(side=LEFT, padx=30, pady=15)
         
-        if self.permissoes.get('ver_historico'):
-            ctk.CTkButton(frame_resumo, text="📄 Ver Histórico", fg_color="#E74C3C", hover_color="#C0392B", command=self.ver_historico).pack(side=RIGHT, padx=(10, 30), pady=15)
+        # Novos botões de integração
+        ctk.CTkButton(frame_resumo, text="📱 Copiar Resumo", fg_color="#8E44AD", hover_color="#732D91", width=120, command=self.copiar_para_celular).pack(side=RIGHT, padx=10, pady=15)
         
-        ctk.CTkButton(frame_resumo, text="📊 Exportar Excel", fg_color="#27AE60", hover_color="#1E8449", command=self.exportar_excel).pack(side=RIGHT, padx=10, pady=15)
+        ctk.CTkButton(frame_resumo, text="📄 PDF", fg_color="#C0392B", hover_color="#922B21", width=80, command=self.exportar_pdf).pack(side=RIGHT, padx=10, pady=15)
+        
+        ctk.CTkButton(frame_resumo, text="📊 Excel", fg_color="#27AE60", hover_color="#1E8449", width=80, command=self.exportar_excel).pack(side=RIGHT, padx=10, pady=15)
+        
+        if self.controller.permissoes.get('ver_historico'):
+            ctk.CTkButton(frame_resumo, text="🕒 Histórico", fg_color="#E67E22", hover_color="#D35400", width=100, command=self.ver_historico).pack(side=RIGHT, padx=(10, 20), pady=15)
 
-    # ==========================================
-    # LÓGICA DE NEGÓCIO E PERSISTÊNCIA DE DADOS
-    # ==========================================
     def carregar_dados(self):
-        """Consulta o banco de dados, aplica filtros ativos e atualiza a grade de visualização."""
         for item in self.tree.get_children():
             self.tree.delete(item)
             
         termo = self.entry_busca.get().strip() if hasattr(self, 'entry_busca') else ""
-        linhas = self.db.buscar_produtos(termo)
+        produtos = self.controller.listar_produtos(termo)
         
         total_pecas = 0
         valor_total = 0
-        pode_ver_financeiro = self.permissoes.get('ver_financeiro')
+        pode_ver_financeiro = self.controller.permissoes.get('ver_financeiro')
         
-        for i, linha in enumerate(linhas):
-            linha_lista = list(linha)
-            qtd = linha_lista[6]
-            preco = linha_lista[7]
+        for i, prod in enumerate(produtos):
+            total_pecas += prod['quantidade']
+            valor_total += (prod['quantidade'] * prod['preco'])
             
-            total_pecas += qtd
-            valor_total += (qtd * preco)
-            
-            if pode_ver_financeiro:
-                linha_lista[7] = f"R$ {preco:.2f}".replace(".", ",")
-            else:
-                linha_lista[7] = "R$ ***"
-                
-            if qtd <= 5:
-                tag = 'baixo_par' if i % 2 == 0 else 'baixo_impar'
-            else:
-                tag = 'par' if i % 2 == 0 else 'impar'
-                
-            self.tree.insert("", END, values=linha_lista, tags=(tag,))
+            preco_formatado = f"R$ {prod['preco']:.2f}".replace(".", ",") if pode_ver_financeiro else "R$ ***"
+            tag = 'baixo_par' if prod['quantidade'] <= 5 and i % 2 == 0 else \
+                  'baixo_impar' if prod['quantidade'] <= 5 else \
+                  'par' if i % 2 == 0 else 'impar'
+                  
+            valores = (prod['id'], prod['sku'], prod['nome'], prod['categoria'], prod['tamanho'], prod['cor'], prod['quantidade'], preco_formatado)
+            self.tree.insert("", END, values=valores, tags=(tag,))
             
         self.lbl_total_pecas.configure(text=f"Total de Peças: {total_pecas} un")
         
@@ -340,7 +303,7 @@ class SistemaEstoqueApp:
         self.produto_id_selecionado = valores[0]
         self.lbl_produto_mov.configure(text=f"Produto Selecionado: {valores[0]} - {valores[2]}")
         
-        if self.permissoes.get('cadastrar_produto') and hasattr(self, 'entry_id'):
+        if self.controller.permissoes.get('cadastrar_produto') and hasattr(self, 'entry_id'):
             self.limpar_campos_produto()
             self.entry_id.configure(state="normal")
             self.entry_id.insert(0, valores[0])
@@ -350,71 +313,69 @@ class SistemaEstoqueApp:
             self.combo_categoria.set(valores[3])
             self.combo_tamanho.set(valores[4])
             self.entry_cor.insert(0, valores[5])
-            
             self.entry_quantidade.insert(0, valores[6])
             
             preco_limpo = str(valores[7]).replace("R$ ", "")
             self.entry_preco.insert(0, preco_limpo)
+
+    def _extrair_dados_formulario(self):
+        nome = self.entry_nome.get().strip()
+        categoria = self.combo_categoria.get()
+        tamanho = self.combo_tamanho.get()
+        cor = self.entry_cor.get().strip()
+        qtd_str = self.entry_quantidade.get()
+        preco_str = self.entry_preco.get()
+
+        if not nome or not cor or not qtd_str or not preco_str:
+            raise DadosInvalidosError("Nome, Cor, Quantidade e Preço são campos obrigatórios.")
             
+        if categoria == "Categoria" or tamanho == "Tamanho":
+            raise DadosInvalidosError("Selecione uma Categoria e um Tamanho válidos.")
+            
+        if nome.isdigit():
+            raise DadosInvalidosError("O nome do produto não pode ser composto exclusivamente por números.")
+            
+        if any(char.isdigit() for char in cor):
+            raise DadosInvalidosError("A cor do produto não deve conter caracteres numéricos.")
+            
+        try:
+            qtd = int(qtd_str)
+            prc = float(preco_str.replace(",", "."))
+            return nome, categoria, tamanho, cor, qtd, prc
+        except ValueError as exc:
+            raise DadosInvalidosError("Quantidade e Preço contêm valores numéricos inválidos.") from exc
+
     def adicionar_produto(self):
-        if not self.entry_nome.get() or not self.entry_cor.get() or not self.entry_quantidade.get() or not self.entry_preco.get():
-            messagebox.showerror("Erro de Validação", "Nome, Cor, Quantidade e Preço são campos obrigatórios.")
-            return
         try:
-            qtd = int(self.entry_quantidade.get())
-            prc = float(self.entry_preco.get().replace(",", "."))
-        except ValueError:
-            messagebox.showerror("Erro de Tipo", "Quantidade e Preço contêm valores inválidos.")
-            return
-
-        self.db.adicionar_produto(self.entry_codigo.get(), self.entry_nome.get(), self.combo_categoria.get(), 
-                                  self.combo_tamanho.get(), self.entry_cor.get(), qtd, prc)
-        self.limpar_campos_produto()
-        self.carregar_dados()
-        messagebox.showinfo("Operação Concluída", "Produto registrado com sucesso no sistema.")
+            nome, categoria, tamanho, cor, qtd, prc = self._extrair_dados_formulario()
+            self.controller.processar_cadastro(
+                self.entry_codigo.get(), nome, categoria, tamanho, cor, qtd, prc
+            )
+            self.limpar_campos_produto()
+            self.carregar_dados()
+            messagebox.showinfo("Operação Concluída", "Produto registado com sucesso no sistema.")
+        except DadosInvalidosError as e:
+            messagebox.showerror("Erro de Validação", str(e))
 
     def atualizar_produto(self):
         produto_id = self.entry_id.get()
         if not produto_id: return
-        if not self.entry_nome.get() or not self.entry_cor.get() or not self.entry_quantidade.get() or not self.entry_preco.get():
-            messagebox.showerror("Erro de Validação", "Nome, Cor, Quantidade e Preço são campos obrigatórios.")
-            return
         try:
-            qtd = int(self.entry_quantidade.get())
-            prc = float(self.entry_preco.get().replace(",", "."))
-        except ValueError:
-            messagebox.showerror("Erro de Validação", "Valores numéricos inválidos informados.")
-            return
-
-        self.db.atualizar_produto(produto_id, self.entry_codigo.get(), self.entry_nome.get(), 
-                                  self.combo_categoria.get(), self.combo_tamanho.get(), self.entry_cor.get(), qtd, prc)
-        self.limpar_campos_produto()
-        self.carregar_dados()
-        messagebox.showinfo("Operação Concluída", "Dados do produto atualizados com sucesso.")
-        
-    def atualizar_produto(self):
-        """Atualiza as informações de um produto existente selecionado pelo ID."""
-        produto_id = self.entry_id.get()
-        if not produto_id: return
-        try:
-            qtd = int(self.var_qtd.get())
-            prc = float(self.var_preco.get().replace(",", "."))
-        except ValueError:
-            messagebox.showerror("Erro de Validação", "Valores numéricos inválidos informados.")
-            return
-
-        self.db.atualizar_produto(produto_id, self.entry_codigo.get(), self.entry_nome.get(), 
-                                  self.combo_categoria.get(), self.combo_tamanho.get(), self.entry_cor.get(), qtd, prc)
-        self.limpar_campos_produto()
-        self.carregar_dados()
-        messagebox.showinfo("Operação Concluída", "Dados do produto atualizados com sucesso.")
+            nome, categoria, tamanho, cor, qtd, prc = self._extrair_dados_formulario()
+            self.controller.processar_atualizacao(
+                produto_id, self.entry_codigo.get(), nome, categoria, tamanho, cor, qtd, prc
+            )
+            self.limpar_campos_produto()
+            self.carregar_dados()
+            messagebox.showinfo("Operação Concluída", "Dados do produto atualizados com sucesso.")
+        except DadosInvalidosError as e:
+            messagebox.showerror("Erro de Validação", str(e))
 
     def excluir_produto(self):
-        """Remove permanentemente o registro de um produto do sistema após confirmação."""
         produto_id = self.entry_id.get()
         if not produto_id: return
         if messagebox.askyesno("Aviso de Exclusão", "Confirma a exclusão permanente deste registro?"):
-            self.db.excluir_produto(produto_id)
+            self.controller.processar_exclusao(produto_id)
             self.limpar_campos_produto()
             self.carregar_dados()
             messagebox.showinfo("Operação Concluída", "Produto removido da base de dados.")
@@ -441,7 +402,7 @@ class SistemaEstoqueApp:
             return "break"
             
         try:
-            self.db.movimentar_estoque(self.produto_id_selecionado, tipo_mov, envolvido, qtd_mov)
+            self.controller.registrar_transacao(self.produto_id_selecionado, tipo_mov, envolvido, qtd_mov)
             msg = f"Transação de {tipo_mov} registrada: {qtd_mov} un. (Referência: {envolvido})."
             
             self.entry_envolvido.delete(0, END)
@@ -458,36 +419,91 @@ class SistemaEstoqueApp:
         return "break"
 
     def exportar_excel(self):
-        """Exporta os dados atuais do inventário para um arquivo CSV codificado em UTF-8."""
-        linhas = self.db.buscar_produtos("")
-        if not linhas:
-            messagebox.showwarning("Base Vazia", "Não existem dados no inventário para exportação.")
-            return
-
         caminho = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("Arquivo Excel/CSV", "*.csv")],
             initialfile=f"relatorio_estoque_{datetime.now().strftime('%d_%m_%Y')}.csv",
             title="Exportar Dados do Sistema"
         )
-        
         if caminho:
             try:
-                pode_ver_financeiro = self.permissoes.get('ver_financeiro')
-                with open(caminho, mode='w', newline='', encoding='utf-8-sig') as f:
-                    writer = csv.writer(f, delimiter=';')
-                    writer.writerow(["ID", "Código", "Nome", "Categoria", "Tamanho", "Cor", "Qtd", "Preço"])
-                    for linha in linhas:
-                        linha_lista = list(linha)
-                        if not pode_ver_financeiro:
-                            linha_lista[7] = "***"
-                        writer.writerow(linha_lista)
+                self.controller.exportar_inventario_csv(caminho)
                 messagebox.showinfo("Sucesso", "Dados exportados com sucesso para o diretório informado.")
             except Exception as e:
                 messagebox.showerror("Falha na Exportação", f"Ocorreu um erro ao processar o arquivo: {e}")
+    def exportar_pdf(self):
+        caminho = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("Documento PDF", "*.pdf")],
+            initialfile=f"relatorio_estoque_{datetime.now().strftime('%d_%m_%Y')}.pdf",
+            title="Exportar Dados do Sistema (PDF)"
+        )
+        if caminho:
+            try:
+                self.controller.exportar_inventario_pdf(caminho)
+                messagebox.showinfo("Sucesso", "Relatório PDF gerado e salvo com sucesso!")
+            except Exception as e:
+                messagebox.showerror("Falha na Exportação", f"Não foi possível salvar o arquivo. Verifique se ele está aberto em outro programa.\nErro: {e}")
+
+    def copiar_para_celular(self):
+        """Gera um relatório completo e categorizado para o WhatsApp, priorizando estoque baixo."""
+        produtos = self.controller.listar_produtos()
+        if not produtos:
+            messagebox.showwarning("Aviso", "Não há produtos no inventário para gerar o relatório.")
+            return
+
+        pode_ver_financeiro = self.controller.permissoes.get('ver_financeiro', False)
+        
+        # Filtra e separa os produtos pela regra de negócio (Estoque Crítico <= 5)
+        baixo_estoque = [p for p in produtos if p['quantidade'] <= 5]
+        estoque_normal = [p for p in produtos if p['quantidade'] > 5]
+        
+        # Cabeçalho
+        texto = f"📦 *POSIÇÃO DE ESTOQUE*\n"
+        texto += f"📅 _{datetime.now().strftime('%d/%m/%Y às %H:%M')}_\n\n"
+        
+        # Bloco 1: Prioridade Máxima (Em Vermelho/Alerta)
+        if baixo_estoque:
+            texto += "🚨 *ESTOQUE CRÍTICO (Requer Atenção)*\n"
+            for p in baixo_estoque:
+                preco_str = f" - R$ {p['preco']:.2f}".replace('.', ',') if pode_ver_financeiro else ""
+                texto += f"🔴 *{p['nome']}* (SKU: {p['sku']})\n"
+                texto += f"      Qtd: {p['quantidade']} un{preco_str}\n"
+            texto += "\n"
+            
+        # Bloco 2: Estoque Saudável
+        if estoque_normal:
+            texto += "✅ *ESTOQUE REGULAR*\n"
+            for p in estoque_normal:
+                preco_str = f" - R$ {p['preco']:.2f}".replace('.', ',') if pode_ver_financeiro else ""
+                texto += f"🔹 {p['nome']} (SKU: {p['sku']})\n"
+                texto += f"      Qtd: {p['quantidade']} un{preco_str}\n"
+            texto += "\n"
+            
+        # Rodapé Financeiro e Quantitativo
+        texto += "━━━━━━━━━━━━━━━━━━\n"
+        
+        # Puxa os totais já calculados nos labels da tela
+        txt_pecas = self.lbl_total_pecas.cget("text").replace("Total de Peças: ", "")
+        texto += f"📊 *Total Geral:* {txt_pecas}\n"
+        
+        if pode_ver_financeiro:
+            txt_valor = self.lbl_valor_total.cget("text").replace("Valor do Inventário: ", "")
+            texto += f"💰 *Patrimônio:* {txt_valor}\n"
+        
+        # Joga para a área de transferência do Windows
+        self.root.clipboard_clear()
+        self.root.clipboard_append(texto)
+        self.root.update() 
+        
+        messagebox.showinfo(
+            "Relatório Copiado!", 
+            "O relatório completo foi gerado e copiado!\n\n"
+            "Itens com estoque crítico (5 ou menos) estão destacados no topo.\n"
+            "Cole (Ctrl+V) no WhatsApp para visualizar a formatação aplicada."
+        )
 
     def ver_historico(self):
-        """Instancia e popula a janela secundária de log de transações."""
         janela_hist = ctk.CTkToplevel(self.root)
         janela_hist.title("Log de Transações")
         janela_hist.geometry("750x450")
@@ -503,34 +519,27 @@ class SistemaEstoqueApp:
             
         tree_h.tag_configure(MOV_ENTRADA, background="#157B18", foreground='black')
         tree_h.tag_configure(MOV_SAIDA, background="#ca1123", foreground='black')
-            
         tree_h.pack(fill=BOTH, expand=True, pady=5)
         
-        for linha in self.db.buscar_historico():
-            tree_h.insert("", END, values=linha, tags=(linha[1],))
+        historico = self.controller.obter_historico()
+        for h in historico:
+            valores = (h['id'], h['tipo'], h['produto_nome'], h['cliente'], h['quantidade'], h['data_hora'])
+            tree_h.insert("", END, values=valores, tags=(h['tipo'],))
 
-        if self.perfil_usuario == "proprietario":
+        if self.controller.perfil_usuario == "proprietario":
             def excluir_hist():
                 sel = tree_h.focus()
                 if sel and messagebox.askyesno("Aviso de Exclusão", "Confirma a exclusão deste registro de transação?"):
-                    self.db.excluir_historico(tree_h.item(sel, "values")[0])
+                    self.controller.processar_exclusao_historico(tree_h.item(sel, "values")[0])
                     tree_h.delete(sel)
             ctk.CTkButton(janela_hist, text="Deletar Registro Selecionado", fg_color="#F44336", hover_color="#D32F2F", command=excluir_hist).pack(pady=10)
 
-    # ==========================================
-    # CONFIGURAÇÕES DE SISTEMA (Interface e Regras)
-    # ==========================================
     def abrir_configuracoes(self):
-        """
-        Monta a janela de configurações administrativas do sistema.
-        Métodos auxiliares extraídos para redução de complexidade cognitiva.
-        """
         janela_cfg = ctk.CTkToplevel(self.root)
         janela_cfg.title("Preferências do Sistema")
         janela_cfg.geometry("450x780") 
         janela_cfg.focus()
         
-        # --- 1: TEMA VISUAL ---
         ctk.CTkLabel(janela_cfg, text="🎨 Aparência da Interface", font=("Arial", 16, "bold")).pack(pady=(15, 5))
         
         tema_atual = "System"
@@ -542,12 +551,10 @@ class SistemaEstoqueApp:
         combo_tema.set(tema_atual)
         combo_tema.pack(pady=5)
 
-        # --- 2: GESTÃO DE DADOS ---
         ctk.CTkLabel(janela_cfg, text="💾 Segurança da Informação", font=("Arial", 16, "bold")).pack(pady=(15, 5))
         ctk.CTkButton(janela_cfg, text="Criar Ponto de Restauração", fg_color="#2980B9", hover_color="#1A5276", width=250, command=self.fazer_backup).pack(pady=5)
         ctk.CTkButton(janela_cfg, text="Recuperar Banco de Dados", fg_color="#E67E22", hover_color="#D35400", width=250, command=self.restaurar_backup).pack(pady=5)
 
-        # --- 3: GESTÃO DE ACESSOS ---
         ctk.CTkLabel(janela_cfg, text="🔑 Credenciais de Acesso", font=("Arial", 16, "bold")).pack(pady=(15, 5))
         e_sd = ctk.CTkEntry(janela_cfg, placeholder_text="Nova Credencial: Administrativa", show="*", width=250)
         e_sd.pack(pady=5)
@@ -556,11 +563,11 @@ class SistemaEstoqueApp:
         
         ctk.CTkLabel(janela_cfg, text="⚙️ Matriz de Permissões (Operacional)", font=("Arial", 16, "bold")).pack(pady=(15, 5))
         
-        perms = self.db.buscar_permissoes_caixa()
-        v_fin = ctk.IntVar(value=perms[0])
-        v_cad = ctk.IntVar(value=perms[1])
-        v_ent = ctk.IntVar(value=perms[2])
-        v_his = ctk.IntVar(value=perms[3])
+        perms = self.controller.obter_permissoes_operacionais()
+        v_fin = ctk.IntVar(value=perms.get('p_ver_financeiro', 0))
+        v_cad = ctk.IntVar(value=perms.get('p_cadastrar_produto', 0))
+        v_ent = ctk.IntVar(value=perms.get('p_fazer_entrada', 0))
+        v_his = ctk.IntVar(value=perms.get('p_ver_historico', 0))
         
         frame_checks = ctk.CTkFrame(janela_cfg, fg_color="transparent")
         frame_checks.pack(pady=5)
@@ -572,36 +579,33 @@ class SistemaEstoqueApp:
         ctk.CTkButton(janela_cfg, text="Aplicar Modificações", fg_color="#4CAF50", hover_color="#45a049", width=250, 
                       command=lambda: self.salvar_configs(janela_cfg, e_sd.get(), e_sc.get(), v_fin.get(), v_cad.get(), v_ent.get(), v_his.get())).pack(pady=15)
 
-    # --- Métodos Auxiliares de Configuração ---
     def mudar_tema(self, nova_escolha):
-        """Altera dinamicamente o tema do sistema e persiste a escolha no disco."""
         ctk.set_appearance_mode(nova_escolha)
         with open(ARQUIVO_TEMA, "w") as arquivo:
             arquivo.write(nova_escolha)
 
     def fazer_backup(self):
-        """Usa a API segura do backend para criar o snapshot do banco de dados."""
         nome_padrao = f"backup_estoque_{datetime.now().strftime('%d_%m_%Y')}.db"
         caminho = filedialog.asksaveasfilename(
             defaultextension=".db", filetypes=[("Banco de Dados", "*.db")],
+            initialdir=DIRETORIO_BASE,
             title="Definir Diretório de Contingência", initialfile=nome_padrao
         )
         if caminho:
             try:
-                self.db.criar_backup(caminho)
+                self.controller.consolidar_backup(caminho)
                 messagebox.showinfo("Operação Concluída", "Ponto de restauração estabelecido com sucesso.")
             except Exception as e:
                 messagebox.showerror("Falha de Contingência", f"Impossível consolidar backup: {e}")
 
     def restaurar_backup(self):
-        """Valida a integridade via backend antes de substituir a base ativa."""
         if not messagebox.askyesno("Sobrescrita de Dados", "A restauração removerá irreversivelmente os dados não contidos no backup. Prosseguir?"):
             return
             
         caminho = filedialog.askopenfilename(filetypes=[("Banco de Dados", "*.db")], title="Localizar Snapshot")
         if caminho:
             try:
-                self.db.restaurar_backup(caminho)
+                self.controller.recuperar_backup(caminho)
                 self.carregar_dados()
                 messagebox.showinfo("Operação Concluída", "Estado do banco de dados revertido com sucesso.")
             except BackupInvalidoError as e:
@@ -612,7 +616,6 @@ class SistemaEstoqueApp:
                 messagebox.showerror("Falha de Restauração", f"Ocorreu um erro inesperado:\n{type(e).__name__}: {str(e)}")
 
     def salvar_configs(self, janela, s_dono, s_caixa, v_fin, v_cad, v_ent, v_his):
-        """Sincroniza as preferências locais de matriz de acesso com o banco de dados."""
-        self.db.salvar_configuracoes(s_dono, s_caixa, v_fin, v_cad, v_ent, v_his)
+        self.controller.aplicar_configuracoes(s_dono, s_caixa, v_fin, v_cad, v_ent, v_his)
         messagebox.showinfo("Atualização Sistêmica", "Preferências administrativas sincronizadas.")
         janela.destroy()
