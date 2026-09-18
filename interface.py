@@ -51,7 +51,7 @@ class SistemaEstoqueApp:
         self.entry_senha.pack(pady=10)
         
         ctk.CTkButton(self.frame_login, text="Entrar", font=("Arial", 14, "bold"), command=self.fazer_login, width=250).pack(pady=(20, 10))
-        ctk.CTkLabel(self.frame_login, text="Usuários padrão: dono | caixa", text_color="gray", font=("Arial", 10)).pack(pady=(0, 20))
+        ctk.CTkLabel(self.frame_login, text="Usuários padrão: dona | caixa", text_color="gray", font=("Arial", 10)).pack(pady=(0, 20))
 
     def fazer_login(self):
         usuario = self.entry_user.get()
@@ -615,7 +615,7 @@ class SistemaEstoqueApp:
             except Exception as e:
                 messagebox.showerror("Falha de Restauração", f"Ocorreu um erro inesperado:\n{type(e).__name__}: {str(e)}")
 
-    def salvar_configs(self, janela, s_dono, s_caixa, v_fin, v_cad, v_ent, v_his):
-        self.controller.aplicar_configuracoes(s_dono, s_caixa, v_fin, v_cad, v_ent, v_his)
+    def salvar_configs(self, janela, s_dona, s_caixa, v_fin, v_cad, v_ent, v_his):
+        self.controller.aplicar_configuracoes(s_dona, s_caixa, v_fin, v_cad, v_ent, v_his)
         messagebox.showinfo("Atualização Sistêmica", "Preferências administrativas sincronizadas.")
         janela.destroy()
